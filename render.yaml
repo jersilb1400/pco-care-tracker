@@ -16,11 +16,10 @@ services:
       - key: PORT
         value: 4000
 
-  - type: web
+  - type: static
     name: care-tracker-frontend
-    env: node
-    buildCommand: cd frontend && npm install && npm run build
-    startCommand: cd frontend && npm start
+    buildCommand: cd frontend && npm install && npm run build (or "npm run export" if you're using "next export")
+    staticPublishPath: frontend/out (or "frontend/.next/static" if you're using "next export")
     envVars:
       - key: NEXT_PUBLIC_API_URL
         value: https://care-tracker-backend.onrender.com (or your backend's Render URL) 
