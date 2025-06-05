@@ -1,0 +1,12 @@
+{
+  "name": "pco-care-tracker",
+  "version": "1.0.0",
+  "description": "PCO Care Tracker - Monday.com to PCO Integration",
+  "main": "scripts/fetch-monday-board.js",
+  "scripts": {
+    "fetch-board": "node scripts/fetch-monday-board.js"
+  },
+  "dependencies": {
+    "node-fetch": "^2.6.7"
+  }
+}
