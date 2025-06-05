@@ -2,7 +2,7 @@ services:
   - type: web
     name: care-tracker-backend
     env: node
-    buildCommand: cd backend && npm install && npm run build (if any) && npm start
+    buildCommand: cd backend && npm install && npm start
     startCommand: cd backend && npm start
     envVars:
       - key: MONGODB_URI
@@ -16,10 +16,11 @@ services:
       - key: PORT
         value: 4000
 
-  - type: static
+  - type: web
     name: care-tracker-frontend
-    buildCommand: cd frontend && npm install && npm run build (or npm run export if you're using Next.js export)
-    staticPublishPath: frontend/out (or frontend/.next/static if you're using Next.js's static export)
+    env: node
+    buildCommand: cd frontend && npm install && npm run build
+    startCommand: cd frontend && npm start
     envVars:
       - key: NEXT_PUBLIC_API_URL
         value: https://care-tracker-backend.onrender.com (or your backend's Render URL) 
