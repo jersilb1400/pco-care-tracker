@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const axios = require('axios');
 
 const app = express();
 
@@ -33,16 +34,96 @@ const intakeSchema = new mongoose.Schema({
 });
 const Intake = mongoose.model('Intake', intakeSchema);
 
+// Helper to search for a person in PCO People
+async function findPersonInPCO({ name, email, phone }) {
+  const baseURL = 'https://api.planningcenteronline.com/people/v2/people';
+  const auth = {
+    username: process.env.PCO_CLIENT_ID,
+    password: process.env.PCO_CLIENT_SECRET
+  };
+
+  let params = {};
+  if (email) params['where[email]'] = email;
+  else if (phone) params['where[phone_number]'] = phone;
+  else if (name) params['where[search_name]'] = name;
+  else return null;
+
+  const res = await axios.get(baseURL, { params, auth });
+  if (res.data.data && res.data.data.length > 0) {
+    return res.data.data[0].id;
+  }
+  return null;
+}
+
+// Helper to create a note on a PCO person
+async function createPCONote(personId, noteContent) {
+  const baseURL = `https://api.planningcenteronline.com/people/v2/people/${personId}/notes`;
+  const auth = {
+    username: process.env.PCO_CLIENT_ID,
+    password: process.env.PCO_CLIENT_SECRET
+  };
+  await axios.post(baseURL, {
+    data: {
+      type: "Note",
+      attributes: {
+        content: noteContent
+      }
+    }
+  }, { auth });
+}
+
 // API endpoint to receive intake form submissions
 app.post('/api/intake', async (req, res) => {
   try {
-    const { personNeedingCare, personNeedingCareEmail, personNeedingCarePhone, submitterName, submitterEmail, submitterPhone, careType, priority, notes, location } = req.body;
-    const intake = new Intake({ personNeedingCare, personNeedingCareEmail, personNeedingCarePhone, submitterName, submitterEmail, submitterPhone, careType, priority, notes, location });
+    const {
+      personNeedingCare, personNeedingCareEmail, personNeedingCarePhone,
+      submitterName, submitterEmail, submitterPhone,
+      careType, priority, notes, location
+    } = req.body;
+
+    const intake = new Intake({
+      personNeedingCare, personNeedingCareEmail, personNeedingCarePhone,
+      submitterName, submitterEmail, submitterPhone,
+      careType, priority, notes, location
+    });
     await intake.save();
+
+    // --- PCO Integration ---
+    const personId = await findPersonInPCO({
+      name: personNeedingCare,
+      email: personNeedingCareEmail,
+      phone: personNeedingCarePhone
+    });
+
+    if (personId) {
+      const submittedAt = new Date().toLocaleString();
+      const noteContent = `
+Care Intake Submission (${submittedAt})
+
+Person Needing Care:
+  Name: ${personNeedingCare}
+  Email: ${personNeedingCareEmail || 'N/A'}
+  Phone: ${personNeedingCarePhone || 'N/A'}
+
+Submitted By:
+  Name: ${submitterName}
+  Email: ${submitterEmail}
+  Phone: ${submitterPhone || 'N/A'}
+
+Care Type: ${careType}
+Priority: ${priority}
+Location: ${location || 'N/A'}
+
+Details/Notes:
+${notes || 'N/A'}
+      `.trim();
+      await createPCONote(personId, noteContent);
+    }
+
     res.status(201).json({ message: 'Submission saved' });
   } catch (err) {
-    console.error('Error saving intake:', err);
-    res.status(500).json({ error: 'Failed to save submission' });
+    console.error('Error saving intake or sending to PCO:', err);
+    res.status(500).json({ error: 'Failed to save submission or send to PCO' });
   }
 });
 
