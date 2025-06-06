@@ -55,6 +55,15 @@ async function findPersonInPCO({ name, email, phone }) {
   return null;
 }
 
+// Helper to get the first note category (or throw if none found)
+async function getNoteCategoryId(auth) {
+  const res = await axios.get('https://api.planningcenteronline.com/people/v2/note_categories', { auth });
+  if (res.data.data && res.data.data.length > 0) {
+    return res.data.data[0].id; // Use the first category
+  }
+  throw new Error('No note categories found in PCO');
+}
+
 // Helper to create a note on a PCO person
 async function createPCONote(personId, noteContent) {
   const baseURL = `https://api.planningcenteronline.com/people/v2/people/${personId}/notes`;
@@ -62,11 +71,14 @@ async function createPCONote(personId, noteContent) {
     username: process.env.PCO_CLIENT_ID,
     password: process.env.PCO_CLIENT_SECRET
   };
+  // Get a note category ID
+  const note_category_id = await getNoteCategoryId(auth);
   await axios.post(baseURL, {
     data: {
       type: "Note",
       attributes: {
-        content: noteContent
+        content: noteContent,
+        note_category_id // <-- include this!
       }
     }
   }, { auth });
