@@ -86,6 +86,7 @@ async function createPCONote(personId, noteContent) {
 
 // API endpoint to receive intake form submissions
 app.post('/api/intake', async (req, res) => {
+  console.log('Received intake submission:', req.body);
   try {
     const {
       personNeedingCare, personNeedingCareEmail, personNeedingCarePhone,
@@ -129,13 +130,18 @@ Location: ${location || 'N/A'}
 Details/Notes:
 ${notes || 'N/A'}
       `.trim();
+      // Log the payload for PCO note creation
+      console.log('Creating PCO note for personId:', personId, 'with payload:', { note: noteContent });
       await createPCONote(personId, noteContent);
+    } else {
+      console.log('No matching PCO person found for intake submission.');
     }
 
     res.status(201).json({ message: 'Submission saved' });
   } catch (err) {
+    // Robust error logging: log the full error (including response data if available) and return a detailed error message.
     console.error('Error saving intake or sending to PCO:', err, err.response?.data);
-    res.status(500).json({ error: 'Failed to save submission or send to PCO' });
+    res.status(500).json({ error: 'Failed to save submission or send to PCO', details: err.response?.data || err.message });
   }
 });
 
