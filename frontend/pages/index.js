@@ -1,5 +1,6 @@
 import { Box, Card, CardContent, Typography, Button } from '@mui/material';
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function Home() {
   return (
@@ -15,7 +16,7 @@ export default function Home() {
       <Card sx={{ maxWidth: 480, width: '100%', borderRadius: 3, boxShadow: 3 }}>
         <CardContent sx={{ textAlign: 'center', p: 5 }}>
           {/* Optional: Add your logo here */}
-          {<img src="/gracefm.png" alt="Logo" style={{ width: 80, marginBottom: 24 }} /> }
+          {<Image src="/gracefm.png" alt="Logo" width={250} height={250} style={{ marginBottom: 24 }} /> }
           <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>
             Welcome to Congregational Care
           </Typography>
