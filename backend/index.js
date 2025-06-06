@@ -77,8 +77,8 @@ async function createPCONote(personId, noteContent) {
     data: {
       type: "Note",
       attributes: {
-        content: noteContent,
-        note_category_id // <-- include this!
+        note: noteContent,
+        note_category_id
       }
     }
   }, { auth });
