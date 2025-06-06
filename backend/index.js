@@ -77,7 +77,7 @@ async function createPCONote(personId, noteContent) {
     data: {
       type: "Note",
       attributes: {
-        note: noteContent,
+        body: noteContent,
         note_category_id
       }
     }
@@ -86,7 +86,7 @@ async function createPCONote(personId, noteContent) {
 
 // API endpoint to receive intake form submissions
 app.post('/api/intake', async (req, res) => {
-  console.log('Received intake submission:', req.body);
+  console.log('Received intake submission:', JSON.stringify(req.body, null, 2));
   try {
     const {
       personNeedingCare, personNeedingCareEmail, personNeedingCarePhone,
@@ -94,14 +94,44 @@ app.post('/api/intake', async (req, res) => {
       careType, priority, notes, location
     } = req.body;
 
+    // Validate required fields
+    if (!personNeedingCare || !submitterName || !submitterEmail || !careType || !priority) {
+      console.error('Missing required fields:', {
+        personNeedingCare: !personNeedingCare,
+        submitterName: !submitterName,
+        submitterEmail: !submitterEmail,
+        careType: !careType,
+        priority: !priority
+      });
+      return res.status(400).json({
+        error: 'Missing required fields',
+        details: {
+          personNeedingCare: !personNeedingCare,
+          submitterName: !submitterName,
+          submitterEmail: !submitterEmail,
+          careType: !careType,
+          priority: !priority
+        }
+      });
+    }
+
     const intake = new Intake({
       personNeedingCare, personNeedingCareEmail, personNeedingCarePhone,
       submitterName, submitterEmail, submitterPhone,
       careType, priority, notes, location
     });
+    
+    console.log('Saving intake to MongoDB:', JSON.stringify(intake, null, 2));
     await intake.save();
+    console.log('Intake saved successfully');
 
     // --- PCO Integration ---
+    console.log('Searching for person in PCO:', {
+      name: personNeedingCare,
+      email: personNeedingCareEmail,
+      phone: personNeedingCarePhone
+    });
+    
     const personId = await findPersonInPCO({
       name: personNeedingCare,
       email: personNeedingCareEmail,
@@ -109,6 +139,7 @@ app.post('/api/intake', async (req, res) => {
     });
 
     if (personId) {
+      console.log('Found person in PCO with ID:', personId);
       const submittedAt = new Date().toLocaleString();
       const noteContent = `
 Care Intake Submission (${submittedAt})
@@ -130,18 +161,42 @@ Location: ${location || 'N/A'}
 Details/Notes:
 ${notes || 'N/A'}
       `.trim();
-      // Log the payload for PCO note creation
-      console.log('Creating PCO note for personId:', personId, 'with payload:', { note: noteContent });
-      await createPCONote(personId, noteContent);
+      
+      console.log('Creating PCO note with content:', noteContent);
+      try {
+        await createPCONote(personId, noteContent);
+        console.log('PCO note created successfully');
+      } catch (noteError) {
+        console.error('Error creating PCO note:', {
+          error: noteError.message,
+          response: noteError.response?.data,
+          status: noteError.response?.status
+        });
+        // Don't fail the whole request if note creation fails
+      }
     } else {
-      console.log('No matching PCO person found for intake submission.');
+      console.log('No matching PCO person found for intake submission');
     }
 
     res.status(201).json({ message: 'Submission saved' });
   } catch (err) {
-    // Robust error logging: log the full error (including response data if available) and return a detailed error message.
-    console.error('Error saving intake or sending to PCO:', err, err.response?.data);
-    res.status(500).json({ error: 'Failed to save submission or send to PCO', details: err.response?.data || err.message });
+    console.error('Error in /api/intake:', {
+      message: err.message,
+      stack: err.stack,
+      response: err.response?.data,
+      status: err.response?.status
+    });
+    
+    // Send a more detailed error response
+    res.status(500).json({
+      error: 'Failed to process submission',
+      details: {
+        message: err.message,
+        type: err.name,
+        status: err.response?.status,
+        pcoError: err.response?.data
+      }
+    });
   }
 });
 

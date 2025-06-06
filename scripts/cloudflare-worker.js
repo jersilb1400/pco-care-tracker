@@ -61,6 +61,18 @@ export default {
           });
         }
 
+        // Check if this is a retry and if we should skip it
+        if (body.event.isRetry) {
+          console.log('Skipping retry webhook to avoid duplicates');
+          return new Response(JSON.stringify({
+            status: 'success',
+            message: 'Retry webhook acknowledged but skipped'
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        
         // Process Monday.com webhook
         const { event } = body;
         console.log('Processing Monday event type:', event.type);
@@ -136,46 +148,173 @@ async function updatePCOCustomFields(personId, caseData, headers) {
       fieldMap[field.attributes.name] = field.id;
     });
     
+    console.log('Field definitions found:', Object.keys(fieldMap).join(', '));
+    
+    // Get existing field data for this person
+    const existingFieldsResponse = await fetch(
+      `https://api.planningcenteronline.com/people/v2/people/${personId}/field_data?per_page=100`,
+      { headers }
+    );
+    
+    if (!existingFieldsResponse.ok) {
+      console.error('Failed to fetch existing fields');
+      return;
+    }
+    
+    const existingFields = await existingFieldsResponse.json();
+    const existingFieldMap = {};
+    
+    // Map existing fields by field definition ID
+    existingFields.data?.forEach(field => {
+      const fieldDefId = field.relationships.field_definition.data.id;
+      existingFieldMap[fieldDefId] = {
+        id: field.id,
+        value: field.attributes.value
+      };
+    });
+    
+    // Debug: Log what fields we're trying to update
+    console.log('Fields we want to update:');
+    fieldsToUpdate.forEach(f => {
+      console.log(`- ${f.name}: ${f.value} (Field ID: ${fieldMap[f.name] || 'not found'})`);
+    });
+    
+    console.log('Existing field IDs for this person:', Object.entries(existingFieldMap).map(([defId, field]) => `${defId}: ${field.value}`).join(', '));
+    
     // Update fields if they exist
     const fieldsToUpdate = [
       { name: 'Care Case ID', value: caseData.caseId },
       { name: 'Care Status', value: caseData.status },
       { name: 'Care Type', value: caseData.careType },
-      { name: 'Monday Item ID', value: String(caseData.mondayItemId) } // Store for later updates
+      { name: 'Submitted By', value: caseData.submitterName },
+      { name: 'Monday Item ID', value: String(caseData.mondayItemId) }
     ];
     
     for (const field of fieldsToUpdate) {
-      if (fieldMap[field.name] && field.value) {
-        const fieldData = {
-          data: {
-            type: 'FieldDatum',
-            attributes: {
-              value: field.value
-            },
-            relationships: {
-              field_definition: {
-                data: {
-                  type: 'FieldDefinition',
-                  id: fieldMap[field.name]
+      const fieldDefId = fieldMap[field.name];
+      if (fieldDefId && field.value) {
+        try {
+          const existingField = existingFieldMap[fieldDefId];
+          
+          if (existingField) {
+            // Field exists - check if value is different before updating
+            if (existingField.value === field.value) {
+              console.log(`Field ${field.name} already has value ${field.value}, skipping update`);
+              continue;
+            }
+            
+            // Field exists with different value, update it with PATCH
+            console.log(`Updating existing field ${field.name} from ${existingField.value} to ${field.value}`);
+            const updateData = {
+              data: {
+                type: 'FieldDatum',
+                id: existingField.id,
+                attributes: {
+                  value: field.value
                 }
               }
+            };
+            
+            const updateResponse = await fetch(
+              `https://api.planningcenteronline.com/people/v2/people/${personId}/field_data/${existingField.id}`,
+              {
+                method: 'PATCH',
+                headers,
+                body: JSON.stringify(updateData)
+              }
+            );
+            
+            if (!updateResponse.ok) {
+              const errorText = await updateResponse.text();
+              console.error(`Failed to update field ${field.name}:`, errorText);
+            } else {
+              console.log(`Updated field ${field.name} to ${field.value}`);
+            }
+          } else {
+            // Field doesn't exist, create it with POST
+            console.log(`Creating new field ${field.name} with value ${field.value}`);
+            const fieldData = {
+              data: {
+                type: 'FieldDatum',
+                attributes: {
+                  value: field.value
+                },
+                relationships: {
+                  field_definition: {
+                    data: {
+                      type: 'FieldDefinition',
+                      id: fieldDefId
+                    }
+                  }
+                }
+              }
+            };
+            
+            const createResponse = await fetch(
+              `https://api.planningcenteronline.com/people/v2/people/${personId}/field_data`,
+              {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(fieldData)
+              }
+            );
+            
+            if (!createResponse.ok) {
+              const errorText = await createResponse.text();
+              const errorData = JSON.parse(errorText);
+              
+              // Check if the error is because field already exists
+              if (errorData.errors?.[0]?.title === 'Validation Error' && 
+                  errorData.errors?.[0]?.detail?.includes('already exists')) {
+                console.log(`Field ${field.name} already exists but wasn't in our list, trying to find and update it`);
+                
+                // Try to get all field data again and find this specific field
+                const retryFieldsResponse = await fetch(
+                  `https://api.planningcenteronline.com/people/v2/people/${personId}/field_data?per_page=100&where[field_definition_id]=${fieldDefId}`,
+                  { headers }
+                );
+                
+                if (retryFieldsResponse.ok) {
+                  const retryFields = await retryFieldsResponse.json();
+                  if (retryFields.data && retryFields.data.length > 0) {
+                    const existingFieldId = retryFields.data[0].id;
+                    
+                    // Now update it
+                    const updateData = {
+                      data: {
+                        type: 'FieldDatum',
+                        id: existingFieldId,
+                        attributes: {
+                          value: field.value
+                        }
+                      }
+                    };
+                    
+                    const updateResponse = await fetch(
+                      `https://api.planningcenteronline.com/people/v2/people/${personId}/field_data/${existingFieldId}`,
+                      {
+                        method: 'PATCH',
+                        headers,
+                        body: JSON.stringify(updateData)
+                      }
+                    );
+                    
+                    if (updateResponse.ok) {
+                      console.log(`Successfully updated field ${field.name} on retry`);
+                    } else {
+                      console.error(`Failed to update field ${field.name} even on retry:`, await updateResponse.text());
+                    }
+                  }
+                }
+              } else {
+                console.error(`Failed to create field ${field.name}:`, errorText);
+              }
+            } else {
+              console.log(`Created field ${field.name} with value ${field.value}`);
             }
           }
-        };
-        
-        const updateResponse = await fetch(
-          `https://api.planningcenteronline.com/people/v2/people/${personId}/field_data`,
-          {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(fieldData)
-          }
-        );
-        
-        if (!updateResponse.ok) {
-          console.error(`Failed to update field ${field.name}:`, await updateResponse.text());
-        } else {
-          console.log(`Updated field ${field.name} to ${field.value}`);
+        } catch (error) {
+          console.error(`Error updating field ${field.name}:`, error);
         }
       }
     }
@@ -272,17 +411,29 @@ async function handleNewItem(event, env) {
     }
 
     console.log('Parsed columns:', JSON.stringify(parsedColumns));
+    
+    // DEBUG: Log column mapping for verification
+    console.log('=== COLUMN MAPPING DEBUG ===');
+    console.log('Person needing care:', itemData.itemName);
+    console.log('Person email (email_mkrkkywc):', parsedColumns.email_mkrkkywc?.email || 'empty');
+    console.log('Person phone (phone_mkrkrbbw):', parsedColumns.phone_mkrkrbbw?.phone || 'empty');
+    console.log('Submitter name (text_mkrkgaj6):', parsedColumns.text_mkrkgaj6?.value || 'empty');
+    console.log('Submitter email (email_mkrkr549):', parsedColumns.email_mkrkr549?.email || 'empty');
+    console.log('Submitter phone (phone_mkrkt8q8):', parsedColumns.phone_mkrkt8q8?.phone || 'empty');
+    console.log('===========================');
 
-    // Map to care data structure using your actual column IDs
-    // Column mapping for your board:
+    // Map to care data structure using your actual column IDs and titles
+    // Column mapping verified from Monday.com API:
+    // name = Person needing care (item name)
+    // email_mkrkkywc = Email of person needing care
+    // phone_mkrkrbbw = Phone of person needing care
     // text_mkrkgaj6 = Submitter Name
-    // email_mkrkkywc = Submitter Email  
-    // email_mkrkr549 = Person Email
-    // phone_mkrkrbbw & phone_mkrkt8q8 = Phone Numbers
+    // email_mkrkr549 = Submitter Email
+    // phone_mkrkt8q8 = Submitter Phone
     // color_mkrk2646 = Care Type (dropdown)
     // status = Priority
     // long_text_mkrkff7z = Details/Notes
-    // text_mkrkw78h = Address
+    // text_mkrkw78h = Location
     // pulse_id_mkrkvsr5 = Case ID (auto number)
     
     // Check if we have the auto-number Case ID
@@ -292,7 +443,6 @@ async function handleNewItem(event, env) {
       caseId = String(parsedColumns.pulse_id_mkrkvsr5.id);
     } else {
       // Auto-number not assigned yet, we'll update it later
-      // For now, use a temporary identifier
       caseId = `Pending-${itemData.itemId}`;
       console.log('Case ID auto-number not yet assigned, using temporary ID:', caseId);
     }
@@ -300,40 +450,41 @@ async function handleNewItem(event, env) {
     const caseData = {
       caseId: caseId,
       personName: itemData.itemName,
+      personEmail: parsedColumns.email_mkrkkywc?.email || 
+                   parsedColumns.email_mkrkkywc?.text || '',
+      personPhone: formatPhoneNumber(parsedColumns.phone_mkrkrbbw?.phone || ''),
       submitterName: parsedColumns.text_mkrkgaj6?.value || '',
-      submitterEmail: parsedColumns.email_mkrkkywc?.email || 
-                      parsedColumns.email_mkrkkywc?.text || '',
-      personEmail: parsedColumns.email_mkrkr549?.email || 
-                   parsedColumns.email_mkrkr549?.text || '',
-      phoneNumber: formatPhoneNumber(parsedColumns.phone_mkrkrbbw?.phone || 
-                   parsedColumns.phone_mkrkt8q8?.phone || ''),
+      submitterEmail: parsedColumns.email_mkrkr549?.email || 
+                      parsedColumns.email_mkrkr549?.text || '',
+      submitterPhone: formatPhoneNumber(parsedColumns.phone_mkrkt8q8?.phone || ''),
       careType: parsedColumns.color_mkrk2646?.label?.text || '',
       priority: parsedColumns.status?.label?.text || 'Normal',
       details: parsedColumns.long_text_mkrkff7z?.text || '',
-      address: parsedColumns.text_mkrkw78h?.value || '',
+      location: parsedColumns.text_mkrkw78h?.value || '',
       status: 'Active',
-      mondayItemId: itemData.itemId // Store this for later updates
+      mondayItemId: itemData.itemId
     };
 
     console.log('Care data:', JSON.stringify(caseData));
+    console.log('Person needing care:', caseData.personName, '- Email:', caseData.personEmail, '- Phone:', caseData.personPhone);
+    console.log('Submitted by:', caseData.submitterName, '- Email:', caseData.submitterEmail, '- Phone:', caseData.submitterPhone);
 
-    // Determine which email to use for PCO person lookup
-    // Use person's email if available, otherwise submitter's email
-    const emailForPCOLookup = caseData.personEmail || caseData.submitterEmail;
+    // Use the person's email for PCO lookup
+    const emailForPCOLookup = caseData.personEmail;
     
     // If no email, we can't proceed
     if (!emailForPCOLookup) {
-      console.error('No email address found in submission');
+      console.error('No email address found for person needing care');
       return new Response(JSON.stringify({
         status: 'error',
-        message: 'No email address provided - cannot create PCO record'
+        message: 'No email address provided for person needing care - cannot create PCO record'
       }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    // Process with PCO using the person's email for lookup but keeping submitter info
+    // Process with PCO using the person's email for lookup
     const result = await processPCOUpdate({...caseData, lookupEmail: emailForPCOLookup}, env);
     
     return new Response(JSON.stringify({
@@ -447,14 +598,47 @@ async function processPCOUpdate(caseData, env) {
       'Content-Type': 'application/json'
     };
 
-    // Search for existing person using the lookup email
-    console.log('Searching for person with email:', caseData.lookupEmail);
-    const searchUrl = `https://api.planningcenteronline.com/people/v2/people?where[search_name_or_email]=${encodeURIComponent(caseData.lookupEmail)}`;
+    // Search for existing person using the person's email first
+    console.log('Searching for person needing care with email:', caseData.lookupEmail);
+    let searchUrl = `https://api.planningcenteronline.com/people/v2/people?where[search_name_or_email]=${encodeURIComponent(caseData.lookupEmail)}`;
     
-    const searchResponse = await fetch(searchUrl, { headers });
-    const searchData = await searchResponse.json();
+    let searchResponse = await fetch(searchUrl, { headers });
+    let searchData = await searchResponse.json();
     
-    console.log('Search response status:', searchResponse.status);
+    console.log('Email search response:', {
+      status: searchResponse.status,
+      resultsCount: searchData.data ? searchData.data.length : 0,
+      searchTerm: caseData.lookupEmail
+    });
+    
+    // If no results by email, try searching by name
+    if ((!searchData.data || searchData.data.length === 0) && caseData.personName) {
+      console.log('No results by email, trying name search for:', caseData.personName);
+      searchUrl = `https://api.planningcenteronline.com/people/v2/people?where[search_name_or_email]=${encodeURIComponent(caseData.personName)}`;
+      searchResponse = await fetch(searchUrl, { headers });
+      searchData = await searchResponse.json();
+      console.log('Name search results count:', searchData.data ? searchData.data.length : 0);
+      
+      // If multiple results, try to find best match by name
+      if (searchData.data && searchData.data.length > 0) {
+        console.log('Found', searchData.data.length, 'people with similar names');
+        for (let person of searchData.data) {
+          console.log('- ', person.attributes.first_name, person.attributes.last_name, '(ID:', person.id, ')');
+        }
+        
+        const exactMatch = searchData.data.find(person => {
+          const fullName = `${person.attributes.first_name} ${person.attributes.last_name}`.toLowerCase();
+          return fullName === caseData.personName.toLowerCase();
+        });
+        
+        if (exactMatch) {
+          console.log('Using exact name match');
+          searchData.data = [exactMatch];
+        } else {
+          console.log('No exact match found, using first result');
+        }
+      }
+    }
     
     if (!searchResponse.ok) {
       throw new Error(`PCO search failed: ${JSON.stringify(searchData)}`);
@@ -466,6 +650,10 @@ async function processPCOUpdate(caseData, env) {
       // Person exists
       personId = searchData.data[0].id;
       console.log('Found existing person with ID:', personId);
+      console.log('Person details:', JSON.stringify({
+        name: `${searchData.data[0].attributes.first_name} ${searchData.data[0].attributes.last_name}`,
+        id: personId
+      }));
     } else {
       // Create new person
       console.log('Creating new person');
@@ -475,8 +663,7 @@ async function processPCOUpdate(caseData, env) {
           type: 'Person',
           attributes: {
             first_name: nameParts[0] || 'Unknown',
-            last_name: nameParts.slice(1).join(' ') || 'Person',
-            primary_email_address: caseData.lookupEmail
+            last_name: nameParts.slice(1).join(' ') || 'Person'
           }
         }
       };
@@ -495,6 +682,64 @@ async function processPCOUpdate(caseData, env) {
       
       personId = createResult.data.id;
       console.log('Created new person with ID:', personId);
+      
+      // Add email address to the newly created person
+      if (caseData.lookupEmail) {
+        const emailData = {
+          data: {
+            type: 'Email',
+            attributes: {
+              address: caseData.lookupEmail,
+              location: 'Primary',
+              primary: true
+            }
+          }
+        };
+        
+        const emailResponse = await fetch(
+          `https://api.planningcenteronline.com/people/v2/people/${personId}/emails`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(emailData)
+          }
+        );
+        
+        if (!emailResponse.ok) {
+          console.error('Failed to add email:', await emailResponse.text());
+        } else {
+          console.log('Added email to person');
+        }
+      }
+      
+      // Add phone number to the newly created person
+      if (caseData.personPhone && caseData.personPhone !== formatPhoneNumber('')) {
+        const phoneData = {
+          data: {
+            type: 'PhoneNumber',
+            attributes: {
+              number: caseData.personPhone,
+              location: 'Mobile',
+              primary: true
+            }
+          }
+        };
+        
+        const phoneResponse = await fetch(
+          `https://api.planningcenteronline.com/people/v2/people/${personId}/phone_numbers`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(phoneData)
+          }
+        );
+        
+        if (!phoneResponse.ok) {
+          console.error('Failed to add phone:', await phoneResponse.text());
+        } else {
+          console.log('Added phone to person');
+        }
+      }
     }
     
     // Update custom fields if we have them configured
