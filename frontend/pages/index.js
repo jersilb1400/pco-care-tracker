@@ -16,12 +16,12 @@ export default function Home() {
       <Card sx={{ maxWidth: 480, width: '100%', borderRadius: 3, boxShadow: 3 }}>
         <CardContent sx={{ textAlign: 'center', p: 5 }}>
           {/* Optional: Add your logo here */}
-          {<Image src="/gracefm.png" alt="Logo" width={250} height={250} style={{ marginBottom: 24 }} /> }
-          <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>
-            Welcome to Congregational Care
+          {<Image src="/gracefm.png" alt="Logo" width={200} height={200} style={{ marginBottom: 10 }} /> }
+          <Typography variant="h5" gutterBottom sx={{ fontWeight: 700 }}>
+            Welcome to Congregational Care at Grace Fellowship Ministries Church
           </Typography>
           <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
-            Submit a care need, track requests, and help us serve our congregation better.
+            Submit a care need to help us serve our congregation better.
           </Typography>
           <Link href="/intake" passHref>
             <Button

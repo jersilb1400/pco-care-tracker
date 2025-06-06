@@ -75,7 +75,7 @@ export default function IntakeForm() {
       alignItems: 'center',
       justifyContent: 'center'
     }}>
-      <Card sx={{ maxWidth: 500, width: '100%', borderRadius: 3, boxShadow: 3 }}>
+      <Card sx={{ maxWidth: 500, width: '100%', borderRadius: 3, boxShadow: 3, py: 6 }}>
         <CardContent>
           <Typography variant="h5" gutterBottom>
             Congregational Care Request
