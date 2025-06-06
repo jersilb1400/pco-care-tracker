@@ -94,11 +94,28 @@ async function createPCONote(personId, noteContent) {
     data: {
       type: "Note",
       attributes: {
-        body: noteContent,
-        note_category_id: note_category_id ? parseInt(note_category_id) : undefined
+        content: noteContent
+      },
+      relationships: {
+        person: {
+          data: {
+            type: "Person",
+            id: personId
+          }
+        }
       }
     }
   };
+
+  // Only add note category if we have one
+  if (note_category_id) {
+    payload.data.relationships.note_category = {
+      data: {
+        type: "NoteCategory",
+        id: note_category_id
+      }
+    };
+  }
   
   console.log('Sending PCO note creation payload:', JSON.stringify(payload, null, 2));
   
