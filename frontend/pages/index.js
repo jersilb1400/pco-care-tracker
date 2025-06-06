@@ -16,9 +16,9 @@ export default function Home() {
       <Card sx={{ maxWidth: 480, width: '100%', borderRadius: 3, boxShadow: 3 }}>
         <CardContent sx={{ textAlign: 'center', p: 5 }}>
           {/* Optional: Add your logo here */}
-          {<Image src="/gracefm.png" alt="Logo" width={200} height={200} style={{ marginBottom: 10 }} /> }
+          {<Image src="/gracefm.png" alt="Logo" width={200} height={200} style={{ marginBottom: 0 }} /> }
           <Typography variant="h5" gutterBottom sx={{ fontWeight: 700 }}>
-            Welcome to Congregational Care at Grace Fellowship Ministries Church
+            Welcome to Congregational Care at Grace Fellowship Ministries
           </Typography>
           <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
             Submit a care need to help us serve our congregation better.
