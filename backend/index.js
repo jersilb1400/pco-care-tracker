@@ -122,7 +122,7 @@ ${notes || 'N/A'}
 
     res.status(201).json({ message: 'Submission saved' });
   } catch (err) {
-    console.error('Error saving intake or sending to PCO:', err);
+    console.error('Error saving intake or sending to PCO:', err, err.response?.data);
     res.status(500).json({ error: 'Failed to save submission or send to PCO' });
   }
 });
