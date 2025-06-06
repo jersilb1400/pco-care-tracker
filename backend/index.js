@@ -64,24 +64,46 @@ async function getNoteCategoryId(auth) {
   throw new Error('No note categories found in PCO');
 }
 
+// Helper function to format phone number for PCO
+function formatPhoneForPCO(phone) {
+  if (!phone) return '';
+  // Remove any non-digit characters
+  const digits = phone.replace(/\D/g, '');
+  // If it starts with 1, remove it
+  const withoutOne = digits.startsWith('1') ? digits.slice(1) : digits;
+  // Format as (XXX) XXX-XXXX
+  return `(${withoutOne.slice(0, 3)}) ${withoutOne.slice(3, 6)}-${withoutOne.slice(6, 10)}`;
+}
+
 // Helper to create a note on a PCO person
 async function createPCONote(personId, noteContent) {
+  // Format phone numbers in the note content
+  noteContent = noteContent.replace(/(\d{10,11})/g, (match) => formatPhoneForPCO(match));
+  
   const baseURL = `https://api.planningcenteronline.com/people/v2/people/${personId}/notes`;
   const auth = {
     username: process.env.PCO_CLIENT_ID,
     password: process.env.PCO_CLIENT_SECRET
   };
+  
   // Get a note category ID
   const note_category_id = await getNoteCategoryId(auth);
-  await axios.post(baseURL, {
+  
+  // Log the exact payload we're sending
+  const payload = {
     data: {
       type: "Note",
       attributes: {
         body: noteContent,
-        note_category_id
+        note_category_id: note_category_id ? parseInt(note_category_id) : undefined
       }
     }
-  }, { auth });
+  };
+  
+  console.log('Sending PCO note creation payload:', JSON.stringify(payload, null, 2));
+  
+  const response = await axios.post(baseURL, payload, { auth });
+  return response.data;
 }
 
 // API endpoint to receive intake form submissions
@@ -169,8 +191,9 @@ ${notes || 'N/A'}
       } catch (noteError) {
         console.error('Error creating PCO note:', {
           error: noteError.message,
-          response: noteError.response?.data,
-          status: noteError.response?.status
+          response: JSON.stringify(noteError.response?.data, null, 2),
+          status: noteError.response?.status,
+          fullError: JSON.stringify(noteError, null, 2)
         });
         // Don't fail the whole request if note creation fails
       }
